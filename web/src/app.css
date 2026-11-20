@@ -1,0 +1,71 @@
+/* Tokens de color y base del chat. Claro por defecto; oscuro según la preferencia del sistema. */
+:root {
+  color-scheme: light dark;
+  --fondo: #f5f6f8;
+  --superficie: #ffffff;
+  --superficie-2: #eef1f5;
+  --borde: #d3d8e0;
+  --texto: #1b1f24;
+  --texto-suave: #57606a;
+  --acento: #2457c5;
+  --acento-texto: #ffffff;
+  --exito: #1a7f37;
+  --exito-fondo: #dafbe1;
+  --peligro: #b42318;
+  --peligro-fondo: #fde8e7;
+  --alerta: #9a5b00;
+  --alerta-fondo: #fff4d6;
+  --radio: 0.6rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fondo: #0f1318;
+    --superficie: #171c22;
+    --superficie-2: #1f262e;
+    --borde: #33404d;
+    --texto: #e6edf3;
+    --texto-suave: #9aa7b4;
+    --acento: #5b8def;
+    --acento-texto: #0b1020;
+    --exito: #56d364;
+    --exito-fondo: #12301c;
+    --peligro: #ff8a80;
+    --peligro-fondo: #3a1614;
+    --alerta: #f2b134;
+    --alerta-fondo: #33270c;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-width: 360px;
+  background: var(--fondo);
+  color: var(--texto);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.45;
+}
+
+:focus-visible {
+  outline: 3px solid var(--acento);
+  outline-offset: 2px;
+}
+
+.solo-lectores {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

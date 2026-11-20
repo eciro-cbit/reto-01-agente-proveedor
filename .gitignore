@@ -1,5 +1,7 @@
 node_modules/
 out/
+tests/.tmp/
+web/dist/
 .env
 .env.*
 !.env.example

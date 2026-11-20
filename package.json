@@ -1,0 +1,47 @@
+{
+  "name": "reto-01-agente-proveedor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agente conversacional de registro como proveedor (Reto 01): herramientas tipadas y demo determinista.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "demo": "tsx demo.ts",
+    "dev": "concurrently -n api,web \"node --import tsx --watch src/server.ts\" \"vite --config web/vite.config.ts\"",
+    "dev:api": "tsx watch src/server.ts",
+    "build": "vite build --config web/vite.config.ts",
+    "start": "tsx src/server.ts",
+    "start:api": "tsx src/server.ts",
+    "check:web": "svelte-check --workspace web --tsconfig ./tsconfig.json --fail-on-warnings",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && npm run check:web",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.12.0",
+    "@hono/node-server": "^2.1.11",
+    "exceljs": "^4.4.0",
+    "hono": "^4.13.19",
+    "pdf-lib": "^1.17.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@testing-library/svelte": "^5.4.2",
+    "@testing-library/user-event": "^14.6.13",
+    "@types/node": "^26.6.6",
+    "concurrently": "^10.0.7",
+    "eslint": "^10.15.0",
+    "jsdom": "^31.0.1",
+    "svelte": "^5.59.1",
+    "svelte-check": "^4.7.8",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.73.0",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
+  }
+}
