@@ -9,7 +9,12 @@ export type Entorno = Readonly<Record<string, string | undefined>>;
 /** Proveedor LLM configurado (solo uno por ahora). */
 export const PROVEEDOR_LLM = "anthropic";
 
-const vacioComoIndefinido = (valor: unknown): unknown => (typeof valor === "string" && valor.trim() === "" ? undefined : valor);
+/** Largo mínimo del código de acceso del despliegue (`CLAVE_ACCESO`), para que no sea trivial de adivinar. */
+export const LARGO_MINIMO_CLAVE_ACCESO = 8;
+/** Peticiones de chat por IP y por minuto cuando `LIMITE_PETICIONES_MINUTO` no está definida. */
+export const LIMITE_PETICIONES_POR_DEFECTO = 20;
+
+const vacioComoIndefinido =(valor: unknown): unknown => (typeof valor === "string" && valor.trim() === "" ? undefined : valor);
 
 const entero = (porDefecto: number, minimo: number) =>
   z.preprocess(vacioComoIndefinido, z.coerce.number().int().min(minimo).default(porDefecto));
@@ -21,9 +26,17 @@ const esquemaConfig = z.object({
   MAX_ITERACIONES: entero(25, 1),
   MAX_TOKENS_SESION: entero(200000, 1000),
   PORT: entero(3000, 1),
+  CLAVE_ACCESO: z.preprocess(
+    vacioComoIndefinido,
+    z.string().min(LARGO_MINIMO_CLAVE_ACCESO, `debe tener al menos ${LARGO_MINIMO_CLAVE_ACCESO} caracteres`).optional(),
+  ),
+  LIMITE_PETICIONES_MINUTO: entero(LIMITE_PETICIONES_POR_DEFECTO, 1),
 });
 
-/** Configuración validada del backend. `claveApi` nunca se registra ni se devuelve en respuestas. */
+/**
+ * Configuración validada del backend. `claveApi` y `claveAcceso` nunca se registran ni se devuelven en respuestas.
+ * `claveAcceso` ausente = el API no exige código (desarrollo local y pruebas).
+ */
 export interface Config {
   claveApi: string | undefined;
   modelo: string;
@@ -31,6 +44,8 @@ export interface Config {
   maxIteraciones: number;
   maxTokensSesion: number;
   puerto: number;
+  claveAcceso: string | undefined;
+  limitePeticionesMinuto: number;
 }
 
 /**
@@ -48,5 +63,7 @@ export function leerConfig(env: Entorno): Resultado<Config> {
     maxIteraciones: d.MAX_ITERACIONES,
     maxTokensSesion: d.MAX_TOKENS_SESION,
     puerto: d.PORT,
+    claveAcceso: d.CLAVE_ACCESO,
+    limitePeticionesMinuto: d.LIMITE_PETICIONES_MINUTO,
   });
 }

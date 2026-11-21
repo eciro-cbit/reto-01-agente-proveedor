@@ -7,8 +7,35 @@ describe("leerConfig", () => {
     const r = leerConfig({});
     expect(r).toEqual({
       ok: true,
-      data: { claveApi: undefined, modelo: "claude-sonnet-5-5", timeoutMs: 60000, maxIteraciones: 25, maxTokensSesion: 200000, puerto: 3000 },
+      data: {
+        claveApi: undefined,
+        modelo: "claude-sonnet-5-5",
+        timeoutMs: 60000,
+        maxIteraciones: 25,
+        maxTokensSesion: 200000,
+        puerto: 3000,
+        claveAcceso: undefined,
+        limitePeticionesMinuto: 20,
+      },
     });
+  });
+
+  it("lee CLAVE_ACCESO y LIMITE_PETICIONES_MINUTO", () => {
+    const r = leerConfig({ CLAVE_ACCESO: "prueba-local-123", LIMITE_PETICIONES_MINUTO: "5" });
+    expect(r.ok && r.data).toMatchObject({ claveAcceso: "prueba-local-123", limitePeticionesMinuto: 5 });
+  });
+
+  it("una CLAVE_ACCESO corta se rechaza con un error claro que no la repite", () => {
+    const r = leerConfig({ CLAVE_ACCESO: "corta1" });
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toMatch(/^Configuración inválida: CLAVE_ACCESO: debe tener al menos 8 caracteres/);
+    expect(!r.ok && r.error).not.toContain("corta1");
+  });
+
+  it("LIMITE_PETICIONES_MINUTO en 0 se rechaza", () => {
+    const r = leerConfig({ LIMITE_PETICIONES_MINUTO: "0" });
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toMatch(/LIMITE_PETICIONES_MINUTO/);
   });
 
   it("lee los valores definidos y trata los vacíos como no definidos", () => {

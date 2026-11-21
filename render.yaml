@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: reto-01-agente-proveedor
+    runtime: node
+    plan: free
+    branch: main
+    autoDeployTrigger: checksPass
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CLAVE_ACCESO
+        sync: false
+      - key: LLM_MODELO
+        value: claude-sonnet-5-5
+      - key: LLM_TIMEOUT_MS
+        value: "60000"
+      - key: MAX_ITERACIONES
+        value: "25"
+      - key: MAX_TOKENS_SESION
+        value: "200000"
+      - key: LIMITE_PETICIONES_MINUTO
+        value: "20"

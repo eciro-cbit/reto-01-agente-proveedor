@@ -10,7 +10,7 @@ C. Fly.io (requiere Dockerfile; máquina siempre encendida con costo bajo)
 D. Azure App Service (Node; más configuración, posible afinidad con Periferia)
 X. Other (please specify)
 
-[Answer]:
+[Answer]: A
 
 ## Q2. [Ingeniero de releases] Protección del link (tu clave de Anthropic paga cada turno)
 
@@ -21,7 +21,7 @@ B. Público, solo con límite de peticiones por IP y tope global de tokens por d
 C. Público sin más protección que los topes actuales
 X. Other (please specify)
 
-[Answer]:
+[Answer]: A
 
 ## Q3. [Ingeniero de releases] Cómo se dispara un despliegue
 
@@ -32,4 +32,4 @@ B. Auto-deploy de la plataforma al hacer push, sin CI
 C. Despliegue manual desde el panel de la plataforma
 X. Other (please specify)
 
-[Answer]:
+[Answer]: A

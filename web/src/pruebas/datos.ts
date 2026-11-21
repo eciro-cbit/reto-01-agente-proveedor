@@ -36,7 +36,7 @@ export function respuestaEnvio(): RespuestaTurno {
   };
 }
 
-export const SALUD: Salud = { ok: true, provider: "anthropic", model: "claude-sonnet-5-5" };
+export const SALUD: Salud = { ok: true, provider: "anthropic", model: "claude-sonnet-5-5", requiereClave: false };
 
 export function vistaSesion(cambios: Partial<VistaSesion> = {}): VistaSesion {
   return { id: "sesion-prueba", creada: "2026-11-20T10:00:00.000Z", historial: [], confirmacionPendiente: null, tokensUsados: 0, ...cambios };

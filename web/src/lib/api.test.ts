@@ -54,6 +54,36 @@ describe("enviarMensaje", () => {
   });
 });
 
+describe("código de acceso y límite (401 / 429)", () => {
+  it("envía x-clave-acceso cuando hay código y no lo envía cuando no hay", async () => {
+    const simulado = instalarFetch([() => respuestaJson(respuestaEcuador()), () => respuestaJson(respuestaEcuador())]);
+    await enviarMensaje("s-1", "hola", { claveAcceso: "prueba-local-123" });
+    sessionStorage.clear();
+    await enviarMensaje("s-1", "hola");
+    const cabeceras = simulado.mock.calls.map(([, init]) => init?.headers as Record<string, string>);
+    expect(cabeceras[0]).toMatchObject({ "x-clave-acceso": "prueba-local-123", "Content-Type": "application/json" });
+    expect(cabeceras[1]).not.toHaveProperty("x-clave-acceso");
+  });
+
+  it("un 401 devuelve requiereClave con el mensaje del backend", async () => {
+    instalarFetch([() => respuestaJson({ error: { code: "CLAVE_INVALIDA", message: "El código de acceso no es válido." } }, 401)]);
+    expect(await enviarMensaje("s-1", "x")).toEqual({ ok: false, error: "El código de acceso no es válido.", requiereClave: true });
+  });
+
+  it("un 429 toma los segundos de Retry-After; sin header usa 60", async () => {
+    const limitado = (cabeceras: Record<string, string>) => () =>
+      new Response(JSON.stringify({ error: { code: "DEMASIADAS_SOLICITUDES", message: "x" } }), { status: 429, headers: cabeceras });
+    instalarFetch([limitado({ "Retry-After": "17" }), limitado({})]);
+    expect(await enviarMensaje("s-1", "x")).toEqual({ ok: false, error: expect.stringMatching(/Espera 17 s/), esperaSegundos: 17 });
+    expect(await enviarMensaje("s-1", "x")).toMatchObject({ ok: false, esperaSegundos: 60 });
+  });
+
+  it("obtenerSesion con 401 también pide el código", async () => {
+    instalarFetch([], { sesion: () => respuestaJson({ error: { code: "CLAVE_REQUERIDA", message: "Falta el código." } }, 401) });
+    expect(await obtenerSesion("s-1")).toMatchObject({ ok: false, requiereClave: true });
+  });
+});
+
 describe("obtenerSesion y obtenerSalud", () => {
   it("devuelve el historial de una sesión existente y codifica el id en la URL", async () => {
     const vista = vistaSesion({ historial: [{ rol: "usuario", texto: "hola", ts: "2026-11-20T10:00:00.000Z" }] });

@@ -8,7 +8,12 @@
  *                      Cuerpo inválido → 400 `{ error: { code, message } }`.
  * - `GET /api/sessions/:id` → 200 `{ id, creada, historial, confirmacionPendiente, tokensUsados }`;
  *                      404 si no existe; 400 si el id es inválido.
- * - `GET /api/health`  → 200 `{ ok: true, provider, model }`. Nunca expone la clave.
+ * - `GET /api/health`  → 200 `{ ok: true, provider, model, requiereClave }`. Nunca expone ninguna clave. Público.
+ * Código de acceso (despliegue): si `CLAVE_ACCESO` está definida, `/api/chat` y `/api/sessions/*` exigen el header
+ * `x-clave-acceso`; sin él o con otro valor → 401 `{ error: { code: "CLAVE_REQUERIDA" | "CLAVE_INVALIDA", message } }`.
+ * Límite por IP: `POST /api/chat` admite `LIMITE_PETICIONES_MINUTO` por minuto; luego 429 con `Retry-After` y
+ * `{ error: { code: "DEMASIADAS_SOLICITUDES", message, esperaSegundos } }`. El límite va antes del código de acceso
+ * para frenar también los intentos de adivinarlo.
  * Errores no previstos → 500 `{ error: { code: "ERROR_INTERNO", message } }` sin traza.
  * CORS solo para el front en desarrollo (`http://localhost:5173`).
  * Front (NFR6): si existe el build `web/dist` (`npm run build`), el mismo servidor lo sirve en las rutas que no son
@@ -30,10 +35,12 @@ import { cargarSistema } from "./agente/prompt";
 import { AlmacenSesiones, PATRON_SESION, validarSessionId } from "./agente/sesiones";
 import type { Sesion } from "./agente/tipos";
 import type { Config } from "./config";
-import { leerConfig } from "./config";
+import { leerConfig, LIMITE_PETICIONES_POR_DEFECTO } from "./config";
 import { describirErrorZod } from "./dominio/esquemas";
 import type { AdaptadorLLM } from "./llm/adapter";
 import { crearAdaptador } from "./llm/index";
+import { exigirClave, HEADER_CLAVE_ACCESO } from "./seguridad/acceso";
+import { crearLimitador, limitarPeticiones, VENTANA_MINUTO_MS } from "./seguridad/limite";
 import { mensajeDeError } from "./tools/tipos";
 
 export const ORIGEN_FRONT_DESARROLLO = "http://localhost:5173";
@@ -46,7 +53,10 @@ const esquemaChat = z.object({
 
 export interface DependenciasApp {
   adaptador: AdaptadorLLM;
-  config: Pick<Config, "maxIteraciones" | "maxTokensSesion">;
+  /** Sin `claveAcceso` no se exige código; sin `limitePeticionesMinuto` se usa el valor por defecto (20). */
+  config: Pick<Config, "maxIteraciones" | "maxTokensSesion"> & Partial<Pick<Config, "claveAcceso" | "limitePeticionesMinuto">>;
+  /** Reloj del límite por IP (las pruebas lo inyectan). */
+  ahora?: () => number;
   /** Raíz del proyecto (contiene fixtures/ y out/). */
   directory: string;
   /** System prompt ya cargado de `agent/prompt.md` + conocimiento. */
@@ -110,9 +120,22 @@ export function crearApp(deps: DependenciasApp): Hono {
   const almacen = deps.almacen ?? new AlmacenSesiones(deps.directory);
   const enCola = crearColaPorSesion();
 
-  app.use("/api/*", cors({ origin: ORIGEN_FRONT_DESARROLLO }));
+  const { maxIteraciones, maxTokensSesion, claveAcceso } = deps.config;
+  const limitador = crearLimitador({
+    maximo: deps.config.limitePeticionesMinuto ?? LIMITE_PETICIONES_POR_DEFECTO,
+    ventanaMs: VENTANA_MINUTO_MS,
+    ahora: deps.ahora,
+  });
 
-  app.get("/api/health", (c) => c.json({ ok: true, provider: deps.adaptador.proveedor, model: deps.adaptador.modelo }));
+  app.use("/api/*", cors({ origin: ORIGEN_FRONT_DESARROLLO, allowHeaders: ["Content-Type", HEADER_CLAVE_ACCESO], exposeHeaders: ["Retry-After"] }));
+
+  app.get("/api/health", (c) =>
+    c.json({ ok: true, provider: deps.adaptador.proveedor, model: deps.adaptador.modelo, requiereClave: claveAcceso !== undefined }),
+  );
+
+  app.post("/api/chat", limitarPeticiones(limitador));
+  app.use("/api/chat", exigirClave({ claveAcceso }));
+  app.use("/api/sessions/*", exigirClave({ claveAcceso }));
 
   app.post("/api/chat", async (c) => {
     const cuerpo = await leerCuerpo(c);
@@ -123,7 +146,8 @@ export function crearApp(deps: DependenciasApp): Hono {
     return enCola(sessionId, async () => {
       const sesion = await almacen.obtenerOCrear(sessionId);
       if (!sesion.ok) return responderError(c, 500, "ERROR_INTERNO", sesion.error);
-      const turno = await ejecutarTurno(sesion.data, message, { adaptador: deps.adaptador, directory: deps.directory, sistema: deps.sistema, ...deps.config });
+      // Campos explícitos: las claves de la configuración nunca viajan hacia el ciclo del agente.
+      const turno = await ejecutarTurno(sesion.data, message, { adaptador: deps.adaptador, directory: deps.directory, sistema: deps.sistema, maxIteraciones, maxTokensSesion });
       const guardada = await almacen.guardar(sesion.data);
       if (!guardada.ok) console.error(guardada.error);
       return c.json(turno);
@@ -161,8 +185,9 @@ async function iniciar(): Promise<void> {
   const app = crearApp({ adaptador, config: config.data, directory: raiz, sistema: sistema.data, dirFront });
   const aviso = config.data.claveApi === undefined ? " — ATENCIÓN: falta ANTHROPIC_API_KEY, el chat responderá con un error claro" : "";
   const front = existsSync(join(dirFront, "index.html")) ? "; chat web en la misma URL" : "; sin build del front (npm run build)";
+  const acceso = config.data.claveAcceso === undefined ? "sin código de acceso" : "con código de acceso";
   serve({ fetch: app.fetch, port: config.data.puerto }, (info) => {
-    console.log(`API del agente en http://localhost:${info.port} (modelo ${adaptador.modelo})${front}${aviso}`);
+    console.log(`API del agente en http://localhost:${info.port} (modelo ${adaptador.modelo}; ${acceso})${front}${aviso}`);
   });
 }
 

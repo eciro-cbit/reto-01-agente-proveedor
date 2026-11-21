@@ -1,110 +1,61 @@
 ## Summary
 
-- Builds: Bolt 3 — front de chat en Svelte 5 (runes) + Vite: historial, entrada, "pensando", tarjetas de tool call (nombre, argumentos, resultado resumido) y confirmación resaltada; `npm run dev` único para front + back; build servido por el mismo backend
-- Touches: `web/` (nuevo), `package.json` (deps + scripts `dev`, `build`, `start`), `vitest.config.ts` (proyecto `web` con jsdom), `tsconfig.json`/`eslint.config.js` (incluir `web/`), `src/server.ts` (servir `web/dist`), `.gitignore` (`web/dist/`), `tests/api/server.test.ts` (estáticos)
-- Tests: ~15 pruebas vitest nuevas del front en jsdom (cliente API, estado, componentes, recorrido del chat con fetch simulado) + humo en navegador real en Build and Test; suites de Bolts 1–2 (150) en verde
+- Builds: Bolt 3.5 — preparación para Render: código de acceso (`CLAVE_ACCESO`, header `x-clave-acceso`) en backend y front, límite de peticiones por IP en `/api/chat`, `engines`, `.github/workflows/ci.yml` y `render.yaml`
+- Touches: `src/config.ts`, `src/server.ts`, nuevo `src/seguridad/{acceso,limite}.ts`, `web/src/lib/{api,chat.svelte}.ts`, nuevo `web/src/componentes/PantallaAcceso.svelte`, `web/src/App.svelte`, `package.json` (`engines`), `.env.example`, nuevos `.github/workflows/ci.yml` y `render.yaml`, pruebas
+- Tests: ~12 pruebas vitest nuevas (acceso 401/200, health público, comparación segura, límite 429 y reinicio de ventana, IP desde `x-forwarded-for`, pantalla de acceso y reintento en el front) + las 189 existentes en verde
 
-# Plan de generación de código — Bolt 3
+# Plan de generación de código — Bolt 3.5 (preparación de despliegue)
 
-Alcance: FR11.1–FR11.3 y NFR6 de `inception/requirements-analysis/requirements.md`, más PRD §6.1 (front: historial, entrada, "pensando", cada tool call visible, confirmación resaltada) y CA3/CA4/CA5 vistos desde el usuario. Registros previos: `bolt-1/code-summary.md`, `bolt-2/code-summary.md`. El Bolt 4 (`modulo/`, `SOLUCION.md`, `README.md`) queda fuera.
+Origen: `operation/deployment-pipeline/cd-config.md` § "Cambios de código necesarios antes del primer despliegue", aprobado en Deployment Pipeline (Q1 Render, Q2 código de acceso + límite por IP, Q3 CI en GitHub Actions sobre `main`). Refuerza NFR2/NFR3 (seguridad y costo) y FR11.1 (el front pide el código). Registros previos: `bolt-1/`, `bolt-2/`, `bolt-3/`. El Bolt 4 (`modulo/`, docs) queda fuera.
 
 ## Decisiones técnicas
 
 | Tema | Decisión | Alternativa descartada |
 |---|---|---|
-| Framework | **Svelte 5** con runes (`$state`, `$derived`, `$effect`, `$props`) + **Vite** + TypeScript (Q4 = A). Equivalencias para alguien de Angular: `$state` ≈ `signal()`, `$derived` ≈ `computed()`, `$effect` ≈ `effect()`, `$props` ≈ `input()`; estado compartido en una clase `.svelte.ts` ≈ servicio inyectable | SvelteKit: router y SSR que el chat no necesita |
-| Paquetes | Un solo `package.json` en la raíz (un `npm install` para todo, NFR6 < 2 min); `web/` solo contiene código y config de Vite | Workspace aparte en `web/`: dos instalaciones y scripts más largos |
-| Dev | `npm run dev` = `concurrently` de `dev:api` (Hono, :3000) y `vite` (:5173) con proxy `/api` → `:3000`; el front llama siempre a rutas relativas `/api/...` | Llamar `http://localhost:3000` desde el front: CORS y URL distinta en producción |
-| Producción | `npm run build` (vite build a `web/dist`) y `npm start`: el mismo servidor Hono sirve la API y los estáticos (`serveStatic` de `@hono/node-server`). Un solo proceso facilita el link público | Servir el front en otro host: dos despliegues |
-| Sesión | `sessionId` = `crypto.randomUUID()` guardado en `localStorage` (con try/catch); botón "Nueva conversación"; al cargar recupera el historial con `GET /api/sessions/:id` | Sin persistencia: se pierde al recargar |
-| Texto del agente | Se muestra como texto plano con saltos de línea (`white-space: pre-wrap`), sin `{@html}` | Renderizar Markdown: requiere sanitizar HTML (riesgo XSS) y otra dependencia |
-| Tool calls | Tarjeta por llamada: nombre, estado ok/error, argumentos (JSON plegable) y resultado resumido; `agente_solicitar_confirmacion` se muestra como aviso destacado | Ocultar detalles: el PRD exige verlas |
-| Confirmación | Con `needsConfirmation: true`, la última respuesta lleva borde/ícono de alerta y aparece una barra con "Sí, enviar" (manda "Sí, confirmo el envío") y "No, todavía no" (manda "No envíes todavía"); el usuario también puede escribir | Solo resaltar sin acciones |
-| Pruebas | `vitest` con un segundo proyecto `web` (entorno `jsdom`, plugin de Svelte) y `@testing-library/svelte`; el proyecto Node existente no cambia. Se suma humo en navegador real (Chromium) durante Build and Test | Playwright E2E automatizado: descarga de navegadores, más pesado de lo que pide la estrategia Minimal |
-| Accesibilidad | Lista de mensajes con `aria-live="polite"`, botones con texto, foco en la entrada tras enviar, `data-testid` en elementos interactivos | — |
-
-## Estructura objetivo
-
-```
-web/
-  index.html
-  vite.config.ts            # plugin svelte, proxy /api, outDir web/dist
-  svelte.config.js
-  src/
-    main.ts
-    App.svelte              # layout: encabezado, lista, barra de confirmación, entrada
-    app.css                 # tokens de color, claro/oscuro, layout responsive
-    lib/
-      tipos.ts              # RespuestaChat, ToolCallVisible, MensajeVisible (espejo del contrato del backend)
-      api.ts                # enviarMensaje, obtenerSesion, obtenerSalud (fetch con timeout y errores claros)
-      chat.svelte.ts        # clase ChatEstado con runes: mensajes, pensando, needsConfirmation, error
-      sesion.ts             # sessionId en localStorage
-    componentes/
-      Encabezado.svelte     # título, modelo (health), nueva conversación
-      ListaMensajes.svelte
-      Mensaje.svelte
-      TarjetaHerramienta.svelte
-      BarraConfirmacion.svelte
-      EntradaMensaje.svelte
-      Pensando.svelte
-```
+| Código de acceso | Middleware Hono en `/api/chat` y `/api/sessions/*`: exige `x-clave-acceso` igual a `CLAVE_ACCESO` con `crypto.timingSafeEqual` sobre hashes SHA-256 (longitud fija). Si `CLAVE_ACCESO` no está definida (local, pruebas existentes), no exige nada. `/api/health` y los estáticos quedan públicos. 401 con mensaje en español | Basic auth del navegador: diálogo feo y sin control de mensaje; login con usuarios: fuera de alcance (PRD §3.2) |
+| Límite por IP | Ventana deslizante en memoria (`Map<ip, timestamps>`), `LIMITE_PETICIONES_MINUTO` (20) solo en `POST /api/chat`; IP = primer valor de `x-forwarded-for` (Render pone proxy), si no la del socket; limpieza periódica para no crecer sin límite; 429 con `Retry-After` y mensaje claro | Paquete externo de rate-limit: una dependencia más para ~40 líneas; Redis: fuera de alcance |
+| Front | `PantallaAcceso.svelte` cuando `/api/health` informa `requiereClave: true` o una llamada devuelve 401; guarda el código en `sessionStorage` (try/catch) y lo envía en cada llamada; 401 posterior → borra y vuelve a pedir; 429 → mensaje "demasiadas solicitudes, espera N s" | Pedir el código en cada mensaje: mala experiencia |
+| Health | `/api/health` añade `requiereClave: boolean` (nunca la clave) | Que el front descubra la protección por prueba y error |
+| CI / CD | `ci.yml` y `render.yaml` exactamente como `cd-config.md`; `"engines": { "node": ">=20" }` | — |
 
 ## Pasos
 
-Trazabilidad: FR/NFR = `requirements.md`; CA = PRD §6.3.
+### Step 1: Configuración (NFR2, NFR3)
+- [x] `src/config.ts`: `CLAVE_ACCESO` opcional (si viene, mínimo 8 caracteres o error claro al arrancar) y `LIMITE_PETICIONES_MINUTO` (entero > 0, default 20).
+- [x] `.env.example`: `CLAVE_ACCESO=` y `LIMITE_PETICIONES_MINUTO=20`. `package.json`: `"engines": { "node": ">=20" }`.
 
-### Step 1: Dependencias, scripts y configuración (NFR6)
-- [x] `npm install -D svelte vite @sveltejs/vite-plugin-svelte svelte-check @testing-library/svelte @testing-library/user-event jsdom concurrently` (versiones estables actuales).
-- [x] Scripts: `dev` (`concurrently -n api,web "npm:dev:api" "vite --config web/vite.config.ts"`), `build` (`vite build --config web/vite.config.ts`), `start` (`tsx src/server.ts`), `check:web` (`svelte-check --workspace web`). `typecheck` añade `svelte-check`. Los scripts existentes se conservan.
-- [x] `web/vite.config.ts` (root `web/`, proxy `/api` → `http://localhost:${PORT ?? 3000}`, `build.outDir` `web/dist`), `web/svelte.config.js`, `web/index.html`.
-- [x] `tsconfig.json` y `eslint.config.js`: incluir `web/src` (lint de `.ts`; `.svelte` lo revisa `svelte-check`).
-- [x] `.gitignore`: añadir `web/dist/`.
+### Step 2: Runner de pruebas
+- [x] Sin cambios de configuración; verificar que `npx vitest run` sigue en 189/189 antes de editar (línea base).
 
-### Step 2: Runner de pruebas del front
-- [x] `vitest.config.ts` con `projects`: `node` (lo actual: `tests/**/*.test.ts`) y `web` (`web/src/**/*.test.ts`, entorno `jsdom`, plugin de Svelte y `svelteTesting()`).
-- [x] Verificar que `npx vitest run --project web` arranca y que `npx vitest run --project node` sigue dando 150/150.
+### Step 3: Lógica de negocio — seguridad del backend
+- [x] `src/seguridad/acceso.ts`: `claveValida(enviada, esperada)` con comparación en tiempo constante; middleware `exigirClave(config)`.
+- [x] `src/seguridad/limite.ts`: `crearLimitador({ maximo, ventanaMs, ahora })` con reloj inyectable; `ipCliente(c)`; middleware `limitarPeticiones`.
 
-### Step 3: Modelo de datos — tipos y cliente de la API (FR11.2, CA5)
-- [x] `web/src/lib/tipos.ts`: tipos espejo de `{ reply, toolCalls[], needsConfirmation }` y del historial de `GET /api/sessions/:id`, tomados de `src/agente/tipos.ts` (import de tipos, sin duplicar si el compilador lo permite).
-- [x] `web/src/lib/api.ts`: `enviarMensaje`, `obtenerSesion`, `obtenerSalud`; timeout del navegador (90 s, mayor que el del LLM); errores de red, 4xx y 5xx convertidos en mensajes claros en español; nunca lanza hacia la UI.
-- [x] `web/src/lib/sesion.ts`: leer/crear/reiniciar `sessionId` con `localStorage` protegido por try/catch.
+### Step 4: Lógica de negocio — pruebas
+- [x] `tests/seguridad/acceso.test.ts`: clave correcta pasa; incorrecta o ausente falla; longitudes distintas no lanzan.
+- [x] `tests/seguridad/limite.test.ts`: 20 pasan y la 21 se rechaza con segundos de espera; tras la ventana vuelve a pasar (reloj inyectado); IPs distintas no se afectan; `x-forwarded-for` con varias IPs toma la primera.
 
-### Step 4: Modelo de datos — pruebas
-- [x] `web/src/lib/api.test.ts` (fetch simulado): respuesta 200 se tipa bien; 400/500 → mensaje claro; error de red y timeout → mensaje claro sin lanzar.
-- [x] `web/src/lib/sesion.test.ts`: crea y reutiliza el id; `localStorage` que lanza → id en memoria.
+### Step 5: API / endpoint — servidor
+- [x] `src/server.ts`: aplicar `exigirClave` a `/api/chat` y `/api/sessions/*`, `limitarPeticiones` a `POST /api/chat`; `/api/health` con `requiereClave`; CORS permite el header `x-clave-acceso`.
 
-### Step 5: Lógica de UI — estado del chat (FR11.1, FR11.3, CA3)
-- [x] `web/src/lib/chat.svelte.ts`: clase `ChatEstado` con `$state` (mensajes, `pensando`, `needsConfirmation`, `error`) y `$derived` (puede enviar); `enviar(texto)` agrega el mensaje del usuario, marca `pensando`, llama a la API, agrega la respuesta con sus toolCalls, actualiza `needsConfirmation`; un error queda como mensaje de error en el chat y el estado se recupera; `cargarHistorial()`; `nuevaConversacion()`.
+### Step 6: API / endpoint — pruebas
+- [x] `tests/api/server.test.ts` (+): con `CLAVE_ACCESO` definida: chat sin header → 401, con header correcto → 200, health sin header → 200 con `requiereClave: true` y sin la clave en el cuerpo, `/` (estáticos) sin header → 200; 21 peticiones seguidas → 429; sin `CLAVE_ACCESO`: todo como antes.
 
-### Step 6: Lógica de UI — pruebas
-- [x] `web/src/lib/chat.test.ts`: envío feliz agrega usuario + agente con toolCalls; `needsConfirmation` se refleja y se apaga en el siguiente turno; error de API deja mensaje de error y permite reenviar; no envía texto vacío ni mientras `pensando`.
-
-### Step 7: Frontend — componentes (FR11.1–FR11.3)
-- [x] `TarjetaHerramienta.svelte`: nombre legible (`proveedor_armar_paquete` → "armar paquete"), badge ok/error, argumentos en `<details>` con JSON formateado, resultado resumido; variante destacada para `agente_solicitar_confirmacion`.
-- [x] `Mensaje.svelte` (usuario / agente / error; texto plano `pre-wrap`; tarjetas de sus toolCalls; marca de "pide confirmación"), `ListaMensajes.svelte` (`aria-live`, autoscroll), `Pensando.svelte`, `EntradaMensaje.svelte` (Enter envía, Shift+Enter salto, deshabilitada mientras piensa), `BarraConfirmacion.svelte` (visible solo con `needsConfirmation`; "Sí, enviar" / "No, todavía no"), `Encabezado.svelte` (modelo desde `/api/health`, "Nueva conversación").
-- [x] `App.svelte` + `app.css`: layout de chat a pantalla completa, ancho máximo legible, responsive desde 360 px, colores con tokens y modo oscuro, `data-testid` en controles.
-- [x] Mensaje de bienvenida con el prompt de ejemplo del PRD §11 como sugerencia clicable.
+### Step 7: Frontend — acceso y límites (FR11.1)
+- [x] `web/src/lib/api.ts`: enviar `x-clave-acceso` si hay código; resultados tipados para 401 (`requiereClave`) y 429 (`esperaSegundos`).
+- [x] `web/src/lib/chat.svelte.ts`: estado `necesitaClave`, `guardarClave(codigo)`, reintento del último mensaje tras ingresar el código; 429 como mensaje de error claro.
+- [x] `web/src/componentes/PantallaAcceso.svelte` (campo tipo password, botón, error si el código es rechazado, `data-testid`) y uso en `App.svelte`.
 
 ### Step 8: Frontend — pruebas (jsdom)
-- [x] `web/src/componentes/TarjetaHerramienta.test.ts`: muestra nombre, argumentos y resultado; error con estilo de error; variante de confirmación.
-- [x] `web/src/componentes/BarraConfirmacion.test.ts`: oculta sin `needsConfirmation`; visible y destacada con él; "Sí, enviar" dispara el envío del texto de confirmación.
-- [x] `web/src/App.test.ts` (fetch simulado): recorrido "Procesa el caso ec-corp-andina…" → aparecen "pensando", luego la respuesta con 5 tarjetas y la barra de confirmación; clic en "Sí, enviar" → segundo turno sin barra; error del backend → mensaje claro y la entrada sigue habilitada.
+- [x] `web/src/componentes/PantallaAcceso.test.ts`: envía el código; muestra error tras 401.
+- [x] `web/src/lib/chat.test.ts` (+): 401 activa `necesitaClave`; tras guardar el código reintenta y envía el header; 429 muestra el mensaje con segundos.
 
-### Step 9: API / endpoint — backend sirve el front (NFR6)
-- [x] `src/server.ts`: si existe `web/dist`, servirlo con `serveStatic` para rutas que no son `/api/*` (fallback a `index.html`); sin `web/dist` no cambia nada. Sin reglas de negocio nuevas.
-- [x] `tests/api/server.test.ts`: con un `dist` de prueba en `tests/.tmp`, `GET /` devuelve el HTML; `/api/health` sigue respondiendo JSON; sin `dist` → 404 en `/` sin romper la API.
+### Step 9: Configuración de entorno/build — CI y Render
+- [x] `.github/workflows/ci.yml` y `render.yaml` con el contenido de `operation/deployment-pipeline/cd-config.md`.
+- [x] Verificación local: `npm run typecheck`, `npm run lint`, `npx vitest run`, `npm run build`, `npm run demo`; `npm start` con `CLAVE_ACCESO=prueba-local-123` y curl: health 200 (`requiereClave: true`), chat sin header 401, con header 200.
 
-### Step 10: Configuración de entorno/build — verificación local
-- [x] `npm run typecheck` (incluye `svelte-check`), `npm run lint`, `npx vitest run` (proyectos `node` y `web`), `npm run build`, `npm run demo` en verde.
-- [x] `npm run dev` levanta API y front; `http://localhost:5173` carga el chat; sin clave el chat muestra el mensaje claro de falta de `ANTHROPIC_API_KEY`.
-- [x] `npm run build && npm start`: `http://localhost:3000` sirve el chat.
-
-### Step 11: Documentación y trazabilidad
-- [x] Comentarios breves en `chat.svelte.ts` y `api.ts`; notas de Svelte 5 ↔ Angular en un comentario de cabecera de `chat.svelte.ts` (README en el Bolt 4).
-
-## Fuera de este Bolt
-
-`modulo/`, `SOLUCION.md`, `README.md` (Bolt 4); despliegue público (Deployment Pipeline).
+### Step 10: Documentación y trazabilidad
+- [x] Comentarios breves en `acceso.ts` y `limite.ts` (por qué tiempo constante, por qué `x-forwarded-for`). README en el Bolt 4.
 
 ## Testing Contract
 
@@ -169,4 +120,4 @@ Trazabilidad: FR/NFR = `requirements.md`; CA = PRD §6.3.
 }
 ```
 
-Mapa de capas: "Data model" = tipos y cliente API del front; "Repository / data access" = sesión en `localStorage` (incluida en el Step 3–4); "Business logic" = estado del chat; "API / endpoint" = backend sirviendo el front; "Frontend behavior" = componentes.
+Capas "Data model" y "Repository" no aplican (sin entidades ni persistencia nuevas).

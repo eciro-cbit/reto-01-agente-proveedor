@@ -20,10 +20,24 @@ export interface Salud {
   ok: true;
   provider: string;
   model: string;
+  /** El servidor exige el código de acceso (`x-clave-acceso`) en el chat y las sesiones. */
+  requiereClave: boolean;
 }
 
-/** Resultado de una llamada a la API: nunca lanza; el error ya viene redactado en español para el chat. */
-export type ResultadoApi<T> = { ok: true; datos: T } | { ok: false; error: string };
+/**
+ * Falla de una llamada a la API, con el error ya redactado en español para el chat.
+ * `requiereClave`: el servidor respondió 401 (falta el código de acceso o no es válido).
+ * `esperaSegundos`: el servidor respondió 429 (límite de peticiones); cuánto esperar antes de reintentar.
+ */
+export interface FallaApi {
+  ok: false;
+  error: string;
+  requiereClave?: true;
+  esperaSegundos?: number;
+}
+
+/** Resultado de una llamada a la API: nunca lanza. */
+export type ResultadoApi<T> = { ok: true; datos: T } | FallaApi;
 
 export type RolMensaje = "usuario" | "asistente" | "error";
 

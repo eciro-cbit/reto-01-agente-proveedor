@@ -90,7 +90,7 @@ describe("GET /api/health y la clave (NFR2)", () => {
     const res = await app.request("/api/health");
     const texto = await res.text();
     expect(res.status).toBe(200);
-    expect(JSON.parse(texto)).toEqual({ ok: true, provider: "anthropic", model: "claude-haiku-5-5" });
+    expect(JSON.parse(texto)).toEqual({ ok: true, provider: "anthropic", model: "claude-haiku-5-5", requiereClave: false });
     expect(texto).not.toContain(CLAVE_FALSA);
   });
 
@@ -109,6 +109,98 @@ describe("GET /api/health y la clave (NFR2)", () => {
     const res = await appCon([]).request("/api/otra");
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: { code: "NO_ENCONTRADO", message: "Ruta no encontrada" } });
+  });
+});
+
+describe("código de acceso y límite por IP (despliegue)", () => {
+  const CLAVE_ACCESO = "prueba-local-123";
+  const CON_CLAVE = { "x-clave-acceso": CLAVE_ACCESO };
+
+  function appProtegida(pasos: PasoGuion[] = [], extra: { limitePeticionesMinuto?: number; dirFront?: string } = {}) {
+    const { limitePeticionesMinuto = 20, dirFront } = extra;
+    return crearApp({
+      adaptador: crearLLMGuionizado(pasos, { modelo: "claude-sonnet-5-5" }),
+      config: { ...config, claveAcceso: CLAVE_ACCESO, limitePeticionesMinuto },
+      directory: entorno.raiz,
+      sistema: "S",
+      ahora: () => 1_000_000,
+      ...(dirFront === undefined ? {} : { dirFront }),
+    });
+  }
+
+  const chat = (app: ReturnType<typeof appProtegida>, cabeceras: Record<string, string>, sessionId = "api-acceso") =>
+    app.request("/api/chat", { method: "POST", headers: { "Content-Type": "application/json", ...cabeceras }, body: JSON.stringify({ sessionId, message: "hola" }) });
+
+  it("chat sin header → 401 claro; con el header correcto → 200", async () => {
+    const app = appProtegida([responderTexto("Hola, ¿qué caso proceso?")]);
+    const sin = await chat(app, {});
+    expect(sin.status).toBe(401);
+    expect(((await sin.json()) as { error: { code: string; message: string } }).error).toMatchObject({ code: "CLAVE_REQUERIDA", message: expect.stringMatching(/código de acceso/) });
+    const con = await chat(app, CON_CLAVE);
+    expect(con.status).toBe(200);
+    expect(((await con.json()) as { reply: string }).reply).toBe("Hola, ¿qué caso proceso?");
+  });
+
+  it("sessions exige el código: sin header o con uno incorrecto → 401, con el correcto llega a la ruta", async () => {
+    const app = appProtegida();
+    expect((await app.request("/api/sessions/no-existe")).status).toBe(401);
+    const mala = await app.request("/api/sessions/no-existe", { headers: { "x-clave-acceso": "otra-clave-999" } });
+    expect(mala.status).toBe(401);
+    expect(((await mala.json()) as { error: { code: string } }).error.code).toBe("CLAVE_INVALIDA");
+    expect((await app.request("/api/sessions/no-existe", { headers: CON_CLAVE })).status).toBe(404);
+  });
+
+  it("health es público, informa requiereClave: true y nunca incluye la clave", async () => {
+    const res = await appProtegida().request("/api/health");
+    const texto = await res.text();
+    expect(res.status).toBe(200);
+    expect(JSON.parse(texto)).toEqual({ ok: true, provider: "guion", model: "claude-sonnet-5-5", requiereClave: true });
+    expect(texto).not.toContain(CLAVE_ACCESO);
+  });
+
+  it("los estáticos del front se sirven sin header", async () => {
+    const dirFront = join(entorno.raiz, "web", "dist-acceso");
+    mkdirSync(dirFront, { recursive: true });
+    writeFileSync(join(dirFront, "index.html"), "<!doctype html><title>front</title>", "utf8");
+    const res = await appProtegida([], { dirFront }).request("/");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("front");
+  });
+
+  it("21 peticiones seguidas de la misma IP → la 21 recibe 429 con Retry-After; otra IP sigue pasando", async () => {
+    const pasos = Array.from({ length: 21 }, () => responderTexto("ok"));
+    const app = appProtegida(pasos);
+    const ip = { ...CON_CLAVE, "x-forwarded-for": "203.0.113.10" };
+    for (let i = 0; i < 20; i += 1) expect((await chat(app, ip, `api-limite-${i}`)).status).toBe(200);
+    const bloqueada = await chat(app, ip, "api-limite-20");
+    expect(bloqueada.status).toBe(429);
+    expect(bloqueada.headers.get("retry-after")).toBe("60");
+    expect(((await bloqueada.json()) as { error: { message: string } }).error.message).toMatch(/Demasiadas solicitudes seguidas\. Espera 60 s/);
+    expect((await chat(app, { ...CON_CLAVE, "x-forwarded-for": "203.0.113.11" }, "api-limite-otra")).status).toBe(200);
+  });
+
+  it("el límite también frena intentos sin código (va antes del 401)", async () => {
+    const app = appProtegida([], { limitePeticionesMinuto: 2 });
+    const ip = { "x-forwarded-for": "203.0.113.20", "x-clave-acceso": "adivinanza-1" };
+    expect((await chat(app, ip)).status).toBe(401);
+    expect((await chat(app, ip)).status).toBe(401);
+    expect((await chat(app, ip)).status).toBe(429);
+  });
+
+  it("sin CLAVE_ACCESO todo funciona como antes, sin header", async () => {
+    const app = appCon([responderTexto("Sin código.")]);
+    const res = await postChat(app, { sessionId: "api-sin-codigo", message: "hola" });
+    expect(res.status).toBe(200);
+    const salud = await app.request("/api/health");
+    expect(await salud.json()).toMatchObject({ requiereClave: false });
+  });
+
+  it("CORS del front en desarrollo permite el header x-clave-acceso", async () => {
+    const res = await appProtegida().request("/api/chat", {
+      method: "OPTIONS",
+      headers: { Origin: ORIGEN_FRONT_DESARROLLO, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "x-clave-acceso" },
+    });
+    expect(res.headers.get("access-control-allow-headers")?.toLowerCase()).toContain("x-clave-acceso");
   });
 });
 
